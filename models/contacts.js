@@ -1,54 +1,42 @@
-import fs from "fs/promises";
-import path from "path";
-import { nanoid } from 'nanoid';
+import { Schema, model } from "mongoose";
+import Joi from 'joi';
+import { handleMongooseError } from "../helpers/handleMongooseError.js";
 
-const contactsPath = path.resolve('models', 'contacts.json');
+const contactSchema = new Schema({
+    name: {
+        type: String,
+        required: [true, 'Set name for contact'],
+    },
+    email: {
+        type: String,
+    },
+    phone: {
+        type: String,
+    },
+    favorite: {
+        type: Boolean,
+        default: false,
+    },
+}, {versionKey: false, timestamps: true});
 
-export const listContacts = async () => {
-    const date = await fs.readFile(contactsPath);
-    return JSON.parse(date);
-};
+contactSchema.post("save", handleMongooseError);
 
-export const getContactById = async (contactId) => {
-    const contacts = await listContacts();
-    const contactById = contacts.find(({ id }) =>
-        id === contactId
-    )
-    return contactById || null;
-};
+export const addSchema = Joi.object({
+    name: Joi.string().required(),
+    email: Joi.string().email().required(),
+    phone: Joi.string().required(),
+    favorite: Joi.boolean()
+});
 
-export const removeContact = async (contactId) => {
-    const contacts = await listContacts();
-    const removeIndex = contacts.findIndex(({ id }) =>
-        id === contactId
-    );
-    if (removeIndex === -1) {
-        return null;
-    };
-    const removeContact = contacts.splice(removeIndex, 1);
-    await fs.writeFile(contactsPath, JSON.stringify(contacts, null, 2))
-    return removeContact;
-};
+export const putSchema = Joi.object({
+    name: Joi.string(),
+    email: Joi.string().email(),
+    phone: Joi.string(),
+    favorite: Joi.boolean()
+}).or("name", "email", "phone", "favorite");
 
-export const addContact = async ({name, email, phone}) => {
-    const newContact = { id: nanoid(), name, email, phone };
-    const contacts = await listContacts();
-    contacts.push(newContact);
-    await fs.writeFile(contactsPath, JSON.stringify(contacts, null, 2));
-    return newContact;
-};
+export const patchSchema = Joi.object({
+    favorite: Joi.boolean().required()
+});
 
-export const updateContact = async (contactId, body) => {
-  const contacts = await listContacts();
-  const index = contacts.findIndex(({ id }) =>
-    id === contactId
-  );
-  if (index === -1) {
-    return null;
-  };
-
-  contacts[index] = { ...contacts[index], ...body };
-  
-  await fs.writeFile(contactsPath, JSON.stringify(contacts, null, 2));
-  return contacts[index];
-};
+export const Contact = model('contact', contactSchema);
