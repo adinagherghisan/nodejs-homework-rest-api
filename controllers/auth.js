@@ -1,0 +1,105 @@
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import gravatar from 'gravatar';
+import path from 'path';
+import fs from 'fs/promises';
+
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const Jimp = require('jimp')
+import { HttpError } from '../helpers/HttpError.js';
+import { User } from '../models/user.js';
+import { tempDir } from '../middlewares/upload.js';
+
+const avatarsDir = path.resolve('public', 'avatars');
+
+export const register = async (req, res) => {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+
+    if (user) {
+        throw HttpError(409, 'Email in use')
+    };
+
+    const hashPassword = await bcrypt.hash(password, 10);
+    const avatarURL = gravatar.url(email)
+    const newUser = await User.create({...req.body, password: hashPassword, avatarURL});
+    res.status(201).json({
+        user: {
+            email: newUser.email,
+            subscription: newUser.subscription}
+    });
+};
+
+export const login = async (req, res) => {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+
+    if (!user) {
+        throw HttpError(401, 'Email or password is wrong')
+    };
+
+    const passwordCompare = await bcrypt.compare(password, user.password);
+    if (!passwordCompare) {
+        throw HttpError(401, 'Email or password is wrong');
+    };
+
+    const payload = {
+        id: user._id,
+    };
+    const { SECRET_KEY } = process.env;
+    const token = jwt.sign(payload, SECRET_KEY, { expiresIn: "23h" });
+    await User.findByIdAndUpdate(user._id, { token });
+    res.status(200).json({
+        token,
+        user: {
+            email,
+            subscription: user.subscription
+        }
+    })
+};
+
+export const getCurrent = async (req, res) => {
+    const { email, subscription } = req.user;
+    res.status(200).json({
+        email,
+        subscription
+    })
+};
+
+export const logout = async (req, res) => {
+    const { _id } = req.user;
+    await User.findByIdAndUpdate(_id, { token: '' });
+
+    res.status(204).json({
+        message: 'No Content'
+    })
+};
+
+export const patchSubscription = async (req, res) => {
+    const { _id } = req.user;
+    const result = await User.findByIdAndUpdate(_id, req.body);
+    if (!result) {
+        throw HttpError(404, "Not found")
+    }
+    res.status(200).json(result);
+};
+
+export const updateAvatar = async (req, res) => {
+    const { _id } = req.user;
+    const { path: tempUpload, filename } = req.file;
+   
+    const resultUpload = path.join(avatarsDir, filename);
+
+    Jimp.read(tempUpload, (err, image) => {
+        if (err) throw HttpError(404, err);
+        image.resize(250, 250)
+            .write(resultUpload);
+    });
+    await fs.unlink(tempUpload);
+  
+    const avatarURL = path.join('avatars', filename);
+    await User.findByIdAndUpdate(_id, { avatarURL });
+
+    res.status(200).json({ avatarURL });
+};
